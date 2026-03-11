@@ -150,7 +150,10 @@ def reset_game_state():
 # =========================================================
 # 身分 / 加入 / 離開
 # =========================================================
-def join_as_host(name):
+def join_as_host(name, pin):
+    if pin != HOST_PIN:
+        return False
+
     def mutator(state):
         state["host_name"] = name.strip() if name.strip() else "主持人"
         return state
@@ -159,6 +162,7 @@ def join_as_host(name):
     st.session_state.role = "host"
     st.session_state.my_group = None
     st.session_state.my_name = name.strip() if name.strip() else "主持人"
+    return True
 
 def join_group(group_idx, name):
     def mutator(state):
@@ -556,14 +560,19 @@ with t4:
 with st.sidebar:
     st.subheader("登入身分")
 
-    if role is None:
-        login_mode = st.radio("請選擇身分", ["主持人", "學生代表"])
-        name_input = st.text_input("名稱（可不填）", value="")
+if role is None:
+    login_mode = st.radio("請選擇身分", ["主持人", "學生代表"])
+    name_input = st.text_input("名稱（可不填）", value="")
 
-        if login_mode == "主持人":
-            if st.button("🎤 以主持人身分進入", type="primary", use_container_width=True):
-                join_as_host(name_input)
+    if login_mode == "主持人":
+        host_pin_input = st.text_input("請輸入主持人 PIN", type="mlm0801")
+
+        if st.button("🎤 以主持人身分進入", type="primary", use_container_width=True):
+            ok = join_as_host(name_input, host_pin_input)
+            if ok:
                 st.rerun()
+            else:
+                st.error("主持人 PIN 錯誤，無法登入主持人模式。")
         else:
             available_labels = []
             available_map = {}
