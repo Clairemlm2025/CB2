@@ -144,7 +144,6 @@ def draw_card(card_type):
 def reset_game_state():
     old = load_state()
     state = get_initial_state()
-    state["players"] = old.get("players", {})
     state["host_name"] = old.get("host_name", "")
     save_state(state)
 
@@ -639,11 +638,12 @@ with st.sidebar:
 
     if role == "host":
         st.info("主持人可重設遊戲，也可在必要時代操作。")
-        if st.button("♻️ 重設整局遊戲", type="primary", use_container_width=True):
-            reset_game_state()
+        if st.button("♻️ 重設盤面（保留組別）", use_container_width=True):
+            reset_board_only()
             st.rerun()
 
-    if st.button("🔄 重新整理畫面", use_container_width=True):
+    if st.button("🧹 完全重開新局（清空組別）", type="primary", use_container_width=True):
+        reset_full_game()
         st.rerun()
 
     st.markdown("---")
