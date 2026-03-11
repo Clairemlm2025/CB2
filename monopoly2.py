@@ -150,6 +150,7 @@ def reset_game_state():
 # =========================================================
 # 身分 / 加入 / 離開
 # =========================================================
+HOST_PIN = "mlm0801"
 def join_as_host(name, pin):
     if pin != HOST_PIN:
         return False
@@ -564,7 +565,6 @@ if role is None:
     login_mode = st.radio("請選擇身分", ["主持人", "學生代表"])
     name_input = st.text_input("名稱（可不填）", value="")
 
-    HOST_PIN = "mlm0801"
 
     if login_mode == "主持人":
         host_pin_input = st.text_input("請輸入主持人 PIN", type="password")
