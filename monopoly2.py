@@ -659,9 +659,9 @@ with st.sidebar:
             reset_board_only()
             st.rerun()
 
-    if st.button("🧹 完全重開新局（清空組別）", type="primary", use_container_width=True):
-        reset_full_game()
-        st.rerun()
+        if st.button("🧹 完全重開新局（清空組別）", type="primary", use_container_width=True):
+            reset_full_game()
+            st.rerun()
 
     st.markdown("---")
     st.subheader("目前操作權")
