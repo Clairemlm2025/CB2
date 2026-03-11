@@ -564,8 +564,10 @@ if role is None:
     login_mode = st.radio("請選擇身分", ["主持人", "學生代表"])
     name_input = st.text_input("名稱（可不填）", value="")
 
+    HOST_PIN = "mlm0801"
+
     if login_mode == "主持人":
-        host_pin_input = st.text_input("請輸入主持人 PIN", type="mlm0801")
+        host_pin_input = st.text_input("請輸入主持人 PIN", type="password")
 
         if st.button("🎤 以主持人身分進入", type="primary", use_container_width=True):
             ok = join_as_host(name_input, host_pin_input)
