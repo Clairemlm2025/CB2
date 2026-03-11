@@ -614,12 +614,12 @@ with st.sidebar:
             st.info("主持人控制台")
 
             if st.button("♻️ 重設盤面（保留組別）", use_container_width=True):
-            reset_board_only()
-            st.rerun()
+                reset_board_only()
+                st.rerun()
 
             if st.button("🧹 完全重開新局（清空組別）", type="primary", use_container_width=True):
-            reset_full_game()
-            st.rerun()
+                reset_full_game()
+                st.rerun()
 
         elif role == "player" and my_group is not None:
             st.success(f"你目前身分：第 {my_group+1} 組 {GROUP_ICONS[my_group]}")
