@@ -141,10 +141,16 @@ def draw_card(card_type):
         return random.choice(CHANCE_CARDS)
     return random.choice(FATE_CARDS)
 
-def reset_game_state():
+
+def reset_board_only():
     old = load_state()
     state = get_initial_state()
+    state["players"] = old.get("players", {})
     state["host_name"] = old.get("host_name", "")
+    save_state(state)
+
+def reset_full_game():
+    state = get_initial_state()
     save_state(state)
 
 # =========================================================
