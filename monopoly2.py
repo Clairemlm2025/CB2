@@ -12,6 +12,7 @@ st.set_page_config(page_title="消費者行為大富翁｜多人共玩版", layo
 # =========================================================
 STATE_FILE = "game_state.json"
 LOCK_FILE = "game_state.lock"
+HOST_PIN = "mlm0801"   # ← 這裡改成你自己的主持人密碼
 
 with open("board.json", "r", encoding="utf-8") as f:
     BOARD = json.load(f)
@@ -150,7 +151,6 @@ def reset_game_state():
 # =========================================================
 # 身分 / 加入 / 離開
 # =========================================================
-HOST_PIN = "mlm0801"
 def join_as_host(name, pin):
     if pin != HOST_PIN:
         return False
@@ -165,9 +165,19 @@ def join_as_host(name, pin):
     st.session_state.my_name = name.strip() if name.strip() else "主持人"
     return True
 
+def reclaim_host(pin):
+    if pin != HOST_PIN:
+        return False
+
+    state = load_state()
+    host_name = state.get("host_name", "").strip() or "主持人"
+    st.session_state.role = "host"
+    st.session_state.my_group = None
+    st.session_state.my_name = host_name
+    return True
+
 def join_group(group_idx, name):
     def mutator(state):
-        # 已被占用則不處理
         if str(group_idx) in state["players"]:
             return state
         state["players"][str(group_idx)] = name.strip() if name.strip() else f"第{group_idx+1}組代表"
@@ -175,7 +185,6 @@ def join_group(group_idx, name):
 
     new_state = update_state(mutator)
 
-    # 再次確認有沒有成功加入
     if str(group_idx) in new_state["players"]:
         joined_name = new_state["players"][str(group_idx)]
         st.session_state.role = "player"
@@ -498,7 +507,7 @@ def render_board(state):
         box-sizing:border-box;
     ">
         <div style="font-size:30px;font-weight:900;">🎲 消費者行為大富翁｜課堂版</div>
-        <div style="font-size:15px;color:#455a64;margin-top:8px;">主持人模式＋學生鎖組版</div>
+        <div style="font-size:15px;color:#455a64;margin-top:8px;">主持人可重新接管＋學生鎖組版</div>
         <div style="margin-top:18px;font-size:20px;font-weight:800;">目前回合：第 {current_group+1} 組</div>
         <div style="margin-top:6px;font-size:18px;color:#5c6bc0;font-weight:700;">目前階段：{phase_text}</div>
         <div style="margin-top:10px;font-size:15px;color:#546e7a;max-width:80%;">
@@ -561,31 +570,28 @@ with t4:
 with st.sidebar:
     st.subheader("登入身分")
 
-if role is None:
-    login_mode = st.radio("請選擇身分", ["主持人", "學生代表"])
-    name_input = st.text_input("名稱（可不填）", value="")
+    if role is None:
+        login_mode = st.radio("請選擇身分", ["主持人", "學生代表"])
+        name_input = st.text_input("名稱（可不填）", value="")
 
-
-    if login_mode == "主持人":
-        host_pin_input = st.text_input("請輸入主持人 PIN", type="password")
-
-        if st.button("🎤 以主持人身分進入", type="primary", use_container_width=True):
-            ok = join_as_host(name_input, host_pin_input)
-            if ok:
-                st.rerun()
-            else:
-                st.error("主持人 PIN 錯誤，無法登入主持人模式。")
+        if login_mode == "主持人":
+            host_pin_input = st.text_input("請輸入主持人 PIN", type="password")
+            if st.button("🎤 以主持人身分進入", type="primary", use_container_width=True):
+                ok = join_as_host(name_input, host_pin_input)
+                if ok:
+                    st.rerun()
+                else:
+                    st.error("主持人 PIN 錯誤，無法登入主持人模式。")
         else:
             available_labels = []
             available_map = {}
 
             for i in range(NUM_GROUPS):
                 if is_group_taken(state, i):
-                    label = f"第 {i+1} 組（已被選）"
-                else:
-                    label = f"第 {i+1} 組"
-                    available_labels.append(label)
-                    available_map[label] = i
+                    continue
+                label = f"第 {i+1} 組"
+                available_labels.append(label)
+                available_map[label] = i
 
             if available_labels:
                 selected_label = st.selectbox("選擇你的組別", available_labels)
@@ -596,18 +602,30 @@ if role is None:
                     st.rerun()
             else:
                 st.warning("所有組別都已被選走。")
-
     else:
         if role == "host":
             st.success("你目前身分：主持人")
         elif role == "player" and my_group is not None:
             st.success(f"你目前身分：第 {my_group+1} 組 {GROUP_ICONS[my_group]}")
+
         if st.session_state.my_name:
             st.caption(f"名稱：{st.session_state.my_name}")
 
         if st.button("🚪 離開目前身分", use_container_width=True):
             leave_current_role()
             st.rerun()
+
+    st.markdown("---")
+    st.subheader("主持人重新接管")
+
+    reclaim_pin_input = st.text_input("重新接管請輸入主持人 PIN", type="password", key="reclaim_host_pin")
+    if st.button("🔑 重新接管主持人權限", use_container_width=True):
+        ok = reclaim_host(reclaim_pin_input)
+        if ok:
+            st.success("已重新取得主持人權限。")
+            st.rerun()
+        else:
+            st.error("PIN 錯誤，無法重新接管。")
 
     st.markdown("---")
     st.subheader("控制台")
@@ -636,7 +654,6 @@ if role is None:
     else:
         st.info(f"現在輪到第 {state['current_group']+1} 組")
 
-    # 擲骰
     can_roll = (
         not state["game_over"]
         and state["phase"] == "roll"
@@ -652,7 +669,6 @@ if role is None:
             process_roll_shared(my_group, allow_host=(role == "host"))
             st.rerun()
 
-    # 答題
     can_answer = (
         not state["game_over"]
         and state["phase"] == "answer"
@@ -754,6 +770,7 @@ with right:
 with st.expander("規則說明"):
     st.markdown("""
 - 主持人可單獨登入，不屬於任何一組
+- 主持人可用 PIN 隨時重新接管權限
 - 學生代表需先選擇組別
 - 某組一旦被一位學生選走，其他人就不能再選同一組
 - 只有輪到的組別能操作；主持人可在必要時代操作
