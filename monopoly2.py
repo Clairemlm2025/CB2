@@ -1,12 +1,11 @@
 import streamlit as st
 import random
 import json
-import time
 import os
 from copy import deepcopy
 from filelock import FileLock
 
-st.set_page_config(page_title="消費者行為大富翁｜多人版", layout="wide")
+st.set_page_config(page_title="消費者行為大富翁｜多人共玩版", layout="wide")
 
 # =========================================================
 # 基本檔案設定
@@ -44,8 +43,11 @@ GROUP_ICONS = [
 ]
 
 # =========================================================
-# 使用者本地 session（只存登入組別，不存遊戲本體）
+# 使用者本地 session
 # =========================================================
+if "role" not in st.session_state:
+    st.session_state.role = None   # None / host / player
+
 if "my_group" not in st.session_state:
     st.session_state.my_group = None
 
@@ -53,7 +55,7 @@ if "my_name" not in st.session_state:
     st.session_state.my_name = ""
 
 # =========================================================
-# 建立初始共享遊戲狀態
+# 初始共享狀態
 # =========================================================
 def get_initial_state():
     return {
@@ -71,8 +73,8 @@ def get_initial_state():
         "game_over": False,
         "winner_group": None,
         "used_question_ids": [],
-        "players": {},  # {"0": "王小明", "1": "李小華"}
-        "host_group": 0
+        "players": {},     # {"0": "王小明", ...}
+        "host_name": ""
     }
 
 def ensure_state_file():
@@ -125,10 +127,7 @@ def all_brand_spaces_owned(state):
     return True
 
 def available_questions(state):
-    return [
-        q for q in QUESTIONS
-        if q["id"] not in state["used_question_ids"]
-    ]
+    return [q for q in QUESTIONS if q["id"] not in state["used_question_ids"]]
 
 def draw_question(state):
     pool = available_questions(state)
@@ -142,17 +141,63 @@ def draw_card(card_type):
     return random.choice(FATE_CARDS)
 
 def reset_game_state():
-    state = get_initial_state()
-    # 保留已加入玩家名稱
     old = load_state()
+    state = get_initial_state()
     state["players"] = old.get("players", {})
-    state["host_group"] = old.get("host_group", 0)
+    state["host_name"] = old.get("host_name", "")
     save_state(state)
+
+# =========================================================
+# 身分 / 加入 / 離開
+# =========================================================
+def join_as_host(name):
+    def mutator(state):
+        state["host_name"] = name.strip() if name.strip() else "主持人"
+        return state
+
+    update_state(mutator)
+    st.session_state.role = "host"
+    st.session_state.my_group = None
+    st.session_state.my_name = name.strip() if name.strip() else "主持人"
+
+def join_group(group_idx, name):
+    def mutator(state):
+        # 已被占用則不處理
+        if str(group_idx) in state["players"]:
+            return state
+        state["players"][str(group_idx)] = name.strip() if name.strip() else f"第{group_idx+1}組代表"
+        return state
+
+    new_state = update_state(mutator)
+
+    # 再次確認有沒有成功加入
+    if str(group_idx) in new_state["players"]:
+        joined_name = new_state["players"][str(group_idx)]
+        st.session_state.role = "player"
+        st.session_state.my_group = group_idx
+        st.session_state.my_name = joined_name
+
+def leave_current_role():
+    if st.session_state.role == "player" and st.session_state.my_group is not None:
+        group_idx = st.session_state.my_group
+
+        def mutator(state):
+            state["players"].pop(str(group_idx), None)
+            return state
+
+        update_state(mutator)
+
+    st.session_state.role = None
+    st.session_state.my_group = None
+    st.session_state.my_name = ""
+
+def is_group_taken(state, group_idx):
+    return str(group_idx) in state["players"]
 
 # =========================================================
 # 共用遊戲流程
 # =========================================================
-def process_roll_shared(group_idx):
+def process_roll_shared(actor_group, allow_host=False):
     def mutator(state):
         if state["game_over"]:
             return state
@@ -160,14 +205,14 @@ def process_roll_shared(group_idx):
         if state["phase"] != "roll":
             return state
 
-        if state["current_group"] != group_idx:
+        if not allow_host and state["current_group"] != actor_group:
             return state
 
+        group_idx = state["current_group"]
         dice = random.randint(1, 6)
         old_pos = state["positions"][group_idx]
         new_pos = (old_pos + dice) % len(BOARD)
 
-        # 通過起點
         if old_pos + dice >= len(BOARD):
             state["money"][group_idx] += PASS_START_BONUS
             add_log(state, f"第 {group_idx+1} 組通過起點，獲得 ${PASS_START_BONUS}")
@@ -178,7 +223,6 @@ def process_roll_shared(group_idx):
 
         space = BOARD[new_pos]
 
-        # 起點
         if space["type"] == "start":
             state["phase"] = "roll"
             state["current_group"] = next_group(group_idx)
@@ -188,7 +232,6 @@ def process_roll_shared(group_idx):
             add_log(state, msg)
             return state
 
-        # 機會
         if space["type"] == "chance":
             card = draw_card("chance")
             state["money"][group_idx] += card["money"]
@@ -205,7 +248,6 @@ def process_roll_shared(group_idx):
             add_log(state, msg)
             return state
 
-        # 命運
         if space["type"] == "fate":
             card = draw_card("fate")
             state["money"][group_idx] += card["money"]
@@ -222,14 +264,11 @@ def process_roll_shared(group_idx):
             add_log(state, msg)
             return state
 
-        # 品牌格
         owner = state["owner"][new_pos]
 
-        # 尚未被佔領：出題
         if owner is None:
             question = draw_question(state)
 
-            # 題庫用完，直接結束
             if question is None:
                 ranking = []
                 for g in range(NUM_GROUPS):
@@ -261,7 +300,6 @@ def process_roll_shared(group_idx):
             add_log(state, msg)
             return state
 
-        # 自己的地
         if owner == group_idx:
             state["phase"] = "roll"
             state["current_group"] = next_group(group_idx)
@@ -274,7 +312,6 @@ def process_roll_shared(group_idx):
             add_log(state, msg)
             return state
 
-        # 別人的地
         toll = space["toll"]
         state["money"][group_idx] -= toll
         state["money"][owner] += toll
@@ -291,7 +328,7 @@ def process_roll_shared(group_idx):
 
     return update_state(mutator)
 
-def process_answer_shared(group_idx, selected_idx):
+def process_answer_shared(actor_group, selected_idx, allow_host=False):
     def mutator(state):
         if state["game_over"]:
             return state
@@ -299,9 +336,10 @@ def process_answer_shared(group_idx, selected_idx):
         if state["phase"] != "answer":
             return state
 
-        if state["current_group"] != group_idx:
+        if not allow_host and state["current_group"] != actor_group:
             return state
 
+        group_idx = state["current_group"]
         q = state["current_question"]
         if q is None:
             return state
@@ -313,7 +351,6 @@ def process_answer_shared(group_idx, selected_idx):
             state["owner"][pos] = group_idx
             if q["id"] not in state["used_question_ids"]:
                 state["used_question_ids"].append(q["id"])
-
             msg = (
                 f"第 {group_idx+1} 組回答正確，成功佔領【{space['name']}】。"
                 f" 理論概念：{q['concept']}。"
@@ -341,7 +378,6 @@ def process_answer_shared(group_idx, selected_idx):
                 })
             ranking.sort(key=lambda x: (x["owned"], x["money"]), reverse=True)
             state["winner_group"] = ranking[0]["group"]
-
             state["last_message"] = (
                 f"所有品牌地都已被佔領，遊戲結束！"
                 f" 冠軍是第 {state['winner_group']+1} 組。"
@@ -350,27 +386,13 @@ def process_answer_shared(group_idx, selected_idx):
         else:
             state["phase"] = "roll"
             state["current_group"] = next_group(group_idx)
+            state["turn"] += 1
             state["last_message"] = msg + f" 下一組：第 {state['current_group']+1} 組。"
             add_log(state, state["last_message"])
 
         return state
 
     return update_state(mutator)
-
-# =========================================================
-# 玩家加入 / 登記組別
-# =========================================================
-def join_group(group_idx, name):
-    def mutator(state):
-        state["players"][str(group_idx)] = name if name.strip() else f"第{group_idx+1}組代表"
-        return state
-    update_state(mutator)
-    st.session_state.my_group = group_idx
-    st.session_state.my_name = name if name.strip() else f"第{group_idx+1}組代表"
-
-def leave_group():
-    st.session_state.my_group = None
-    st.session_state.my_name = ""
 
 # =========================================================
 # 棋盤顯示
@@ -470,8 +492,8 @@ def render_board(state):
         padding:20px;
         box-sizing:border-box;
     ">
-        <div style="font-size:30px;font-weight:900;">🎲 消費者行為大富翁｜多人版</div>
-        <div style="font-size:15px;color:#455a64;margin-top:8px;">同一網址・同一局遊戲・輪到才可操作</div>
+        <div style="font-size:30px;font-weight:900;">🎲 消費者行為大富翁｜課堂版</div>
+        <div style="font-size:15px;color:#455a64;margin-top:8px;">主持人模式＋學生鎖組版</div>
         <div style="margin-top:18px;font-size:20px;font-weight:800;">目前回合：第 {current_group+1} 組</div>
         <div style="margin-top:6px;font-size:18px;color:#5c6bc0;font-weight:700;">目前階段：{phase_text}</div>
         <div style="margin-top:10px;font-size:15px;color:#546e7a;max-width:80%;">
@@ -510,65 +532,87 @@ def render_board(state):
     st.markdown(html, unsafe_allow_html=True)
 
 # =========================================================
-# 頁面
+# 主畫面
 # =========================================================
 state = load_state()
+role = st.session_state.role
 my_group = st.session_state.my_group
 
 st.title("🎲 消費者行為大富翁｜多人共玩版")
 
-top1, top2, top3, top4 = st.columns([1, 1, 1, 3])
-with top1:
+t1, t2, t3, t4 = st.columns([1, 1, 1, 3])
+with t1:
     st.metric("目前回合", f"第 {state['current_group']+1} 組")
-with top2:
+with t2:
     st.metric("目前階段", "擲骰" if state["phase"] == "roll" else "答題")
-with top3:
+with t3:
     st.metric("已答對題數", len(state["used_question_ids"]))
-with top4:
+with t4:
     st.info(state["last_message"])
 
 # =========================================================
-# 側邊欄：加入組別 / 控制區
+# 側邊欄
 # =========================================================
 with st.sidebar:
-    st.subheader("玩家登入")
+    st.subheader("登入身分")
 
-    if my_group is None:
-        name_input = st.text_input("你的名字（可不填）", value="")
-        group_options = [f"第 {i+1} 組" for i in range(NUM_GROUPS)]
-        selected_group_label = st.selectbox("選擇你的組別", group_options)
-        selected_group = group_options.index(selected_group_label)
+    if role is None:
+        login_mode = st.radio("請選擇身分", ["主持人", "學生代表"])
+        name_input = st.text_input("名稱（可不填）", value="")
 
-        occupied_by = state["players"].get(str(selected_group))
-        if occupied_by:
-            st.warning(f"此組目前登記代表：{occupied_by}")
+        if login_mode == "主持人":
+            if st.button("🎤 以主持人身分進入", type="primary", use_container_width=True):
+                join_as_host(name_input)
+                st.rerun()
+        else:
+            available_labels = []
+            available_map = {}
 
-        if st.button("✅ 加入這一組", type="primary", use_container_width=True):
-            join_group(selected_group, name_input)
-            st.rerun()
+            for i in range(NUM_GROUPS):
+                if is_group_taken(state, i):
+                    label = f"第 {i+1} 組（已被選）"
+                else:
+                    label = f"第 {i+1} 組"
+                    available_labels.append(label)
+                    available_map[label] = i
+
+            if available_labels:
+                selected_label = st.selectbox("選擇你的組別", available_labels)
+                selected_group = available_map[selected_label]
+
+                if st.button("✅ 加入這一組", type="primary", use_container_width=True):
+                    join_group(selected_group, name_input)
+                    st.rerun()
+            else:
+                st.warning("所有組別都已被選走。")
+
     else:
-        st.success(f"你目前是：第 {my_group+1} 組 {GROUP_ICONS[my_group]}")
+        if role == "host":
+            st.success("你目前身分：主持人")
+        elif role == "player" and my_group is not None:
+            st.success(f"你目前身分：第 {my_group+1} 組 {GROUP_ICONS[my_group]}")
         if st.session_state.my_name:
             st.caption(f"名稱：{st.session_state.my_name}")
 
-        if st.button("🚪 離開目前組別", use_container_width=True):
-            leave_group()
+        if st.button("🚪 離開目前身分", use_container_width=True):
+            leave_current_role()
             st.rerun()
 
     st.markdown("---")
-    st.subheader("房間控制")
+    st.subheader("控制台")
 
-    host_group = state.get("host_group", 0)
-    is_host = (my_group == host_group)
+    host_can_control = role == "host"
+    player_can_control = (
+        role == "player"
+        and my_group is not None
+        and state["current_group"] == my_group
+    )
 
-    st.caption(f"主持組：第 {host_group+1} 組")
-
-    if is_host:
+    if role == "host":
+        st.info("主持人可重設遊戲，也可在必要時代操作。")
         if st.button("♻️ 重設整局遊戲", type="primary", use_container_width=True):
             reset_game_state()
             st.rerun()
-    else:
-        st.info("只有主持組可重設整局。")
 
     if st.button("🔄 重新整理畫面", use_container_width=True):
         st.rerun()
@@ -576,36 +620,33 @@ with st.sidebar:
     st.markdown("---")
     st.subheader("目前操作權")
 
-    if my_group is None:
-        st.warning("請先加入組別。")
+    if state["game_over"]:
+        st.error("遊戲已結束")
     else:
-        if state["game_over"]:
-            st.error("遊戲已結束")
-        elif state["current_group"] == my_group:
-            st.success("現在輪到你們組操作")
-        else:
-            st.info(f"現在輪到第 {state['current_group']+1} 組")
+        st.info(f"現在輪到第 {state['current_group']+1} 組")
 
-    # 擲骰按鈕
+    # 擲骰
     can_roll = (
-        my_group is not None
-        and not state["game_over"]
+        not state["game_over"]
         and state["phase"] == "roll"
-        and state["current_group"] == my_group
+        and (player_can_control or host_can_control)
     )
 
     if can_roll:
-        if st.button("🎲 擲骰", type="primary", use_container_width=True):
-            process_roll_shared(my_group)
+        roll_label = "🎲 擲骰"
+        if role == "host":
+            roll_label = f"🎲 代第 {state['current_group']+1} 組擲骰"
+
+        if st.button(roll_label, type="primary", use_container_width=True):
+            process_roll_shared(my_group, allow_host=(role == "host"))
             st.rerun()
 
-    # 答題區
+    # 答題
     can_answer = (
-        my_group is not None
-        and not state["game_over"]
+        not state["game_over"]
         and state["phase"] == "answer"
-        and state["current_group"] == my_group
         and state["current_question"] is not None
+        and (player_can_control or host_can_control)
     )
 
     if can_answer:
@@ -622,13 +663,28 @@ with st.sidebar:
         answer_choice = st.radio(
             "請選擇答案",
             q["options"],
-            key=f"answer_group_{my_group}_turn_{state['turn']}"
+            key=f"answer_{role}_{state['turn']}_{state['current_group']}"
         )
 
-        if st.button("✅ 提交答案", type="primary", use_container_width=True):
+        submit_label = "✅ 提交答案"
+        if role == "host":
+            submit_label = f"✅ 代第 {state['current_group']+1} 組提交答案"
+
+        if st.button(submit_label, type="primary", use_container_width=True):
             selected_idx = q["options"].index(answer_choice)
-            process_answer_shared(my_group, selected_idx)
+            process_answer_shared(my_group, selected_idx, allow_host=(role == "host"))
             st.rerun()
+
+    st.markdown("---")
+    st.subheader("已加入組別")
+    for i in range(NUM_GROUPS):
+        if str(i) in state["players"]:
+            st.caption(f"第 {i+1} 組：{state['players'][str(i)]}")
+        else:
+            st.caption(f"第 {i+1} 組：未加入")
+
+    if state.get("host_name"):
+        st.caption(f"主持人：{state['host_name']}")
 
 # =========================================================
 # 遊戲結束提示
@@ -637,7 +693,7 @@ if state["game_over"] and state["winner_group"] is not None:
     st.success(f"🏁 遊戲結束！冠軍是第 {state['winner_group']+1} 組 {GROUP_ICONS[state['winner_group']]}")
 
 # =========================================================
-# 主畫面
+# 主畫面內容
 # =========================================================
 left, right = st.columns([2.2, 1], gap="large")
 
@@ -660,7 +716,7 @@ with right:
 
     for idx, item in enumerate(ranking, start=1):
         g = item["group"]
-        rep = state["players"].get(str(g), "未登記")
+        rep = state["players"].get(str(g), "未加入")
         st.markdown(
             f"""
             <div style="
@@ -686,24 +742,12 @@ with right:
 
 with st.expander("規則說明"):
     st.markdown("""
-- 13 組可用同一網址加入同一局遊戲
-- 每位玩家先選擇自己的組別
-- **只有輪到的組別能操作**
-- 共用同一個棋盤、同一個回合、同一份遊戲狀態
-- 起始現金皆為 **$2000**
-- 通過起點可獲得 **$200**
-- 走到未被佔領的品牌格：  
-  - 題目從「尚未被答對過」的題庫中隨機抽出  
-  - 答對：成功佔領，且該題不再出現  
-  - 答錯：支付該格固定過路費  
-- 走到已被別組佔領的格子：  
-  - 不可再搶佔  
-  - 不回答題目  
-  - 直接支付固定過路費給原佔領組  
-- 走到自己已佔領的格子：安全通過
-- 若所有品牌地都已被佔領，遊戲結束
-- 若所有可用題目都已答對過，遊戲也會直接結束
-- 排名先比 **佔領格數**，再比 **現金**
+- 主持人可單獨登入，不屬於任何一組
+- 學生代表需先選擇組別
+- 某組一旦被一位學生選走，其他人就不能再選同一組
+- 只有輪到的組別能操作；主持人可在必要時代操作
+- 題目從尚未被答對過的題庫中抽出
+- 題目答對後，不會再重複出現
+- 所有品牌地都被佔領，或所有可用題目都已答對過時，遊戲結束
+- 排名先比佔領格數，再比現金
     """)
-
-st.caption("多人同步提醒：所有人請使用同一台伺服器上的同一個網址；本版本使用共享 JSON 檔保存同一局狀態。")
