@@ -643,26 +643,28 @@ with st.sidebar:
         else:
             st.error("PIN 錯誤，無法重新接管。")
 
-st.markdown("---")
-st.subheader("控制台")
+with st.sidebar:
 
-host_can_control = role == "host"
-player_can_control = (
-    role == "player"
-    and my_group is not None
-    and state["current_group"] == my_group
+    st.markdown("---")
+    st.subheader("控制台")
+
+    host_can_control = role == "host"
+    player_can_control = (
+        role == "player"
+        and my_group is not None
+        and state["current_group"] == my_group
 )
 
-if role == "host":
-    st.info("主持人控制台")
+    if role == "host":
+        st.info("主持人控制台")
 
-    if st.button("♻️ 重設盤面（保留組別）", use_container_width=True):
-        reset_board_only()
-        st.rerun()
+        if st.button("♻️ 重設盤面（保留組別）", use_container_width=True):
+            reset_board_only()
+            st.rerun()
 
-    if st.button("🧹 完全重開新局（清空組別）", type="primary", use_container_width=True):
-        reset_full_game()
-        st.rerun()
+        if st.button("🧹 完全重開新局（清空組別）", type="primary", use_container_width=True):
+            reset_full_game()
+            st.rerun()
 
 st.markdown("---")
 st.subheader("目前操作權")
