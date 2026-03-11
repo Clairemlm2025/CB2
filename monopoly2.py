@@ -666,61 +666,61 @@ with st.sidebar:
             reset_full_game()
             st.rerun()
 
-st.markdown("---")
-st.subheader("目前操作權")
+    st.markdown("---")
+    st.subheader("目前操作權")
 
-if state["game_over"]:
-    st.error("遊戲已結束")
-else:
-    st.info(f"現在輪到第 {state['current_group']+1} 組")
+    if state["game_over"]:
+        st.error("遊戲已結束")
+    else:
+        st.info(f"現在輪到第 {state['current_group']+1} 組")
 
-    can_roll = (
-        not state["game_over"]
-        and state["phase"] == "roll"
-        and (player_can_control or host_can_control)
+        can_roll = (
+            not state["game_over"]
+            and state["phase"] == "roll"
+            and (player_can_control or host_can_control)
     )
 
-    if can_roll:
-        roll_label = "🎲 擲骰"
-        if role == "host":
-            roll_label = f"🎲 代第 {state['current_group']+1} 組擲骰"
+        if can_roll:
+            roll_label = "🎲 擲骰"
+            if role == "host":
+                roll_label = f"🎲 代第 {state['current_group']+1} 組擲骰"
 
-        if st.button(roll_label, type="primary", use_container_width=True):
-            process_roll_shared(my_group, allow_host=(role == "host"))
-            st.rerun()
+            if st.button(roll_label, type="primary", use_container_width=True):
+                process_roll_shared(my_group, allow_host=(role == "host"))
+                st.rerun()
 
-    can_answer = (
-        not state["game_over"]
-        and state["phase"] == "answer"
-        and state["current_question"] is not None
-        and (player_can_control or host_can_control)
+        can_answer = (
+            not state["game_over"]
+            and state["phase"] == "answer"
+            and state["current_question"] is not None
+            and (player_can_control or host_can_control)
     )
 
-    if can_answer:
-        q = state["current_question"]
-        pos = state["current_space"]
-        space = BOARD[pos]
+        if can_answer:
+            q = state["current_question"]
+            pos = state["current_space"]
+            space = BOARD[pos]
 
-        st.warning(f"目前所在格：{space['name']}")
-        st.caption(f"題目 ID：{q['id']}")
-        st.caption(f"答對可佔領；答錯支付固定過路費 ${space['toll']}")
-        st.markdown("### 題目")
-        st.write(q["question"])
+            st.warning(f"目前所在格：{space['name']}")
+            st.caption(f"題目 ID：{q['id']}")
+            st.caption(f"答對可佔領；答錯支付固定過路費 ${space['toll']}")
+            st.markdown("### 題目")
+            st.write(q["question"])
 
-        answer_choice = st.radio(
-            "請選擇答案",
-            q["options"],
-            key=f"answer_{role}_{state['turn']}_{state['current_group']}"
+            answer_choice = st.radio(
+                "請選擇答案",
+                q["options"],
+                key=f"answer_{role}_{state['turn']}_{state['current_group']}"
         )
 
-        submit_label = "✅ 提交答案"
-        if role == "host":
-            submit_label = f"✅ 代第 {state['current_group']+1} 組提交答案"
+            submit_label = "✅ 提交答案"
+            if role == "host":
+                submit_label = f"✅ 代第 {state['current_group']+1} 組提交答案"
 
-        if st.button(submit_label, type="primary", use_container_width=True):
-            selected_idx = q["options"].index(answer_choice)
-            process_answer_shared(my_group, selected_idx, allow_host=(role == "host"))
-            st.rerun()
+            if st.button(submit_label, type="primary", use_container_width=True):
+                selected_idx = q["options"].index(answer_choice)
+                process_answer_shared(my_group, selected_idx, allow_host=(role == "host"))
+                st.rerun()
 
     st.markdown("---")
     st.subheader("已加入組別")
