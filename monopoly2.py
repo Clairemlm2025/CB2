@@ -653,15 +653,17 @@ with st.sidebar:
         and state["current_group"] == my_group
     )
 
-    if role == "host":
-        st.info("主持人可重設遊戲，也可在必要時代操作。")
-        if st.button("♻️ 重設盤面（保留組別）", use_container_width=True):
-            reset_board_only()
-            st.rerun()
+if role == "host":
 
-        if st.button("🧹 完全重開新局（清空組別）", type="primary", use_container_width=True):
-            reset_full_game()
-            st.rerun()
+    st.info("主持人控制台")
+
+    if st.button("♻️ 重設盤面（保留組別）", use_container_width=True):
+        reset_board_only()
+        st.rerun()
+
+    if st.button("🧹 完全重開新局（清空組別）", type="primary", use_container_width=True):
+        reset_full_game()
+        st.rerun()
 
     st.markdown("---")
     st.subheader("目前操作權")
